@@ -31,10 +31,11 @@ def close_db(exception=None):
         db.close()
 
 def init_db():
-    """Initialize database tables if they don't exist."""
+    """Initialize database tables if they don't exist, and insert default alert rules."""
     db = pymysql.connect(**db_config)
     cur = db.cursor()
 
+    # ----- Create tables -----
     # Hosts
     cur.execute("""
         CREATE TABLE IF NOT EXISTS hosts (
@@ -114,7 +115,7 @@ def init_db():
             role VARCHAR(16) NOT NULL DEFAULT 'manager'
         )
     """)
-    # SSL Certificates table (for grocery-store logic)
+    # SSL Certificates
     cur.execute("""
         CREATE TABLE IF NOT EXISTS ssl_certificates (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -125,7 +126,7 @@ def init_db():
             UNIQUE KEY unique_host_port (hostname, port)
         )
     """)
-    # AI Anomalies insights
+    # AI Insights
     cur.execute("""
         CREATE TABLE IF NOT EXISTS ai_insights (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -141,7 +142,7 @@ def init_db():
         )
     """)
 
-    # Migrations for existing alerts/hosts (if not already present)
+    # ----- Apply migrations for older installations -----
     try:
         cur.execute("ALTER TABLE alerts ADD COLUMN status VARCHAR(16) DEFAULT 'OPEN'")
     except Exception:
@@ -157,7 +158,7 @@ def init_db():
 
     db.commit()
 
-    # Bootstrap admin user if none exist
+    # ----- Bootstrap admin user -----
     cur.execute("SELECT COUNT(*) FROM users")
     if cur.fetchone()[0] == 0:
         admin_user = Config.ADMIN_USER
@@ -166,6 +167,31 @@ def init_db():
             "INSERT INTO users (username, password_hash, role) VALUES (%s, %s, 'admin')",
             (admin_user, generate_password_hash(admin_pass))
         )
+        db.commit()
+
+    # ----- Insert default alert rules if none exist -----
+    cur.execute("SELECT COUNT(*) FROM alert_rules")
+    if cur.fetchone()[0] == 0:
+        default_rules = [
+            ('%', 'cpu', 90, '>', 'CRITICAL', 300,
+             'CPU usage exceeded 90%', 'Check top processes and reduce load.'),
+            ('%', 'cpu', 75, '>', 'WARNING', 300,
+             'CPU usage exceeded 75%', 'Monitor trends; consider scaling.'),
+            ('%', 'memory', 90, '>', 'CRITICAL', 300,
+             'Memory usage exceeded 90%', 'Check for memory leaks; add swap or RAM.'),
+            ('%', 'memory', 75, '>', 'WARNING', 300,
+             'Memory usage exceeded 75%', 'Monitor growth; plan capacity.'),
+            ('%', 'disk', 95, '>', 'CRITICAL', 300,
+             'Disk usage exceeded 95%', 'Clean up logs; extend volume.'),
+            ('%', 'disk', 80, '>', 'WARNING', 300,
+             'Disk usage exceeded 80%', 'Review retention; archive old data.'),
+        ]
+        for rule in default_rules:
+            cur.execute(
+                "INSERT INTO alert_rules (hostname, metric, threshold, operator, severity, cooldown, cause, action) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                rule
+            )
         db.commit()
 
     cur.close()
