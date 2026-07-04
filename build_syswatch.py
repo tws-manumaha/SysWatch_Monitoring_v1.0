@@ -1216,23 +1216,35 @@ Time: {datetime.datetime.utcnow().isoformat()}"""
     send_teams(subject, body)
 ''',
 
-    # --- AI ---
+    # ---------- AI (FIXED) ----------
     "modules/ai/__init__.py": '''# modules/ai/__init__.py
 ''',
 
     "modules/ai/anomaly.py": '''# modules/ai/anomaly.py
 import statistics
+import logging
 from core.database import get_db
-from core.app import app
 from modules.alert_engine.notifiers import dispatch_alert
 
+logger = logging.getLogger(__name__)
+
 def run_anomaly_detection():
+    """Scheduled job: detect anomalies in CPU, memory, disk metrics."""
+    from core.app import app  # Import inside to avoid circular import
+
     with app.app_context():
         db = get_db()
         cur = db.cursor()
 
         cur.execute("SELECT DISTINCT hostname FROM hosts WHERE status != 'DOWN'")
         hosts = cur.fetchall()
+
+        if not hosts:
+            logger.info("No active hosts found for anomaly detection.")
+            cur.close()
+            return
+
+        logger.info(f"Running anomaly detection for {len(hosts)} host(s)")
 
         for (hostname,) in hosts:
             for metric in ['cpu', 'memory', 'disk']:
@@ -1271,6 +1283,7 @@ def run_anomaly_detection():
                         (hostname, metric, current_value, mean, std, deviation, severity)
                     )
                     db.commit()
+                    logger.info(f"Anomaly detected on {hostname} - {metric}: {current_value:.1f}% (baseline: {mean:.1f}±{std:.1f})")
 
                     if severity == "CRITICAL":
                         dispatch_alert(
@@ -1283,10 +1296,11 @@ def run_anomaly_detection():
                             action="Investigate this anomaly. Check for recent changes or processes."
                         )
 
-                cur.execute("DELETE FROM ai_insights WHERE timestamp < NOW() - INTERVAL 7 DAY")
-                db.commit()
+            cur.execute("DELETE FROM ai_insights WHERE timestamp < NOW() - INTERVAL 7 DAY")
+            db.commit()
 
         cur.close()
+        logger.info("Anomaly detection completed.")
 ''',
 
     # --- Agents ---
