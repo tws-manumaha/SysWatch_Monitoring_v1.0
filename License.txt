@@ -1,0 +1,40 @@
+
+---
+
+## 4. `.gitignore` File
+
+This file prevents committing unnecessary files and secrets.
+
+```gitignore
+# Python virtual environments
+venv/
+env/
+.venv/
+*.pyc
+__pycache__/
+
+# Environment variables (secrets)
+.env
+*.env
+
+# Agent IDs
+agent_id
+
+# Logs and databases
+*.log
+*.sqlite
+*.sqlite3
+
+# IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS junk
+Thumbs.db
+.DS_Store
+
+# Backup directories
+*-backup
+backup_*

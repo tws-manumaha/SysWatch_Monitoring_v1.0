@@ -58,9 +58,7 @@ class Config:
     SSL_KEY = os.getenv("SSL_KEY", "")
 EOF
 
-# core/database.py
-cat > core/database.py <<'EOF'
-# core/database.py - Database connection and initialization
+"core/database.py": '''# core/database.py - Database connection and initialization
 import pymysql
 from flask import g
 from werkzeug.security import generate_password_hash
@@ -93,9 +91,11 @@ def close_db(exception=None):
         db.close()
 
 def init_db():
+    """Initialize database tables if they don't exist, and insert default alert rules."""
     db = pymysql.connect(**db_config)
     cur = db.cursor()
 
+    # ----- Create tables -----
     cur.execute("""
         CREATE TABLE IF NOT EXISTS hosts (
             hostname VARCHAR(128) PRIMARY KEY,
@@ -194,6 +194,7 @@ def init_db():
         )
     """)
 
+    # ----- Apply migrations for older installations -----
     try:
         cur.execute("ALTER TABLE alerts ADD COLUMN status VARCHAR(16) DEFAULT 'OPEN'")
     except Exception:
@@ -209,6 +210,7 @@ def init_db():
 
     db.commit()
 
+    # ----- Bootstrap admin user -----
     cur.execute("SELECT COUNT(*) FROM users")
     if cur.fetchone()[0] == 0:
         admin_user = Config.ADMIN_USER
@@ -219,9 +221,34 @@ def init_db():
         )
         db.commit()
 
+    # ----- Insert default alert rules if none exist -----
+    cur.execute("SELECT COUNT(*) FROM alert_rules")
+    if cur.fetchone()[0] == 0:
+        default_rules = [
+            ('%', 'cpu', 90, '>', 'CRITICAL', 300,
+             'CPU usage exceeded 90%', 'Check top processes and reduce load.'),
+            ('%', 'cpu', 75, '>', 'WARNING', 300,
+             'CPU usage exceeded 75%', 'Monitor trends; consider scaling.'),
+            ('%', 'memory', 90, '>', 'CRITICAL', 300,
+             'Memory usage exceeded 90%', 'Check for memory leaks; add swap or RAM.'),
+            ('%', 'memory', 75, '>', 'WARNING', 300,
+             'Memory usage exceeded 75%', 'Monitor growth; plan capacity.'),
+            ('%', 'disk', 95, '>', 'CRITICAL', 300,
+             'Disk usage exceeded 95%', 'Clean up logs; extend volume.'),
+            ('%', 'disk', 80, '>', 'WARNING', 300,
+             'Disk usage exceeded 80%', 'Review retention; archive old data.'),
+        ]
+        for rule in default_rules:
+            cur.execute(
+                "INSERT INTO alert_rules (hostname, metric, threshold, operator, severity, cooldown, cause, action) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                rule
+            )
+        db.commit()
+
     cur.close()
     db.close()
-EOF
+''',
 
 # core/scheduler.py
 cat > core/scheduler.py <<'EOF'
