@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SysWatch - Infrastructure Monitoring</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+        :root { --bg: #ffffff; --text: #333; --card-bg: #f9f9f9; }
+        body.dark { --bg: #1e1e1e; --text: #ddd; --card-bg: #2a2a2a; }
+        body { font-family: Arial; margin: 20px; background: var(--bg); color: var(--text); }
+        .summary-cards { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+        .card { background: var(--card-bg); border: 1px solid #ccc; padding: 15px; border-radius: 8px; flex: 1; min-width: 120px; text-align: center;}
+        .card h3 { margin: 0 0 5px; }
+        .card .value { font-size: 1.8em; font-weight: bold; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 15px; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 0.9em; }
+        th { background: #eee; color: #333; }
+        tr:hover { background: rgba(0,0,0,0.05); cursor: pointer; }
+        .status-UP { color: green; font-weight: bold; }
+        .status-WARNING { color: orange; font-weight: bold; }
+        .status-DOWN { color: red; font-weight: bold; }
+        .status-OPEN { color: red; }
+        .status-ACKNOWLEDGED { color: orange; }
+        .status-RESOLVED { color: green; }
+        .tab { overflow: hidden; border-bottom: 1px solid #ccc; margin-bottom: 10px; }
+        .tab button { background: inherit; border: none; padding: 10px 20px; cursor: pointer; }
+        .tab button.active { background: #ddd; color: #333; }
+        .tabcontent { display: none; }
+        .chart-box { width: 80%; margin: auto; margin-top: 20px; }
+        .filters { margin-bottom: 10px; }
+        .filters select, .filters input { margin-right: 10px; }
+        .admin-section { margin-top: 20px; }
+        .admin-section input, .admin-section select { margin-right: 10px; }
+        .ack-btn { background: #ffc107; border: none; padding: 3px 8px; cursor: pointer; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h1>🚀 SysWatch Monitoring</h1>
+        <div>
+            <button onclick="toggleDarkMode()">🌓 Dark</button>
+            <a href="/logout" style="margin-left:20px">Logout</a>
+        </div>
+    </div>
+
+    <div class="summary-cards">
+        <div class="card"><h3>Total Hosts</h3><div class="value" id="totalHosts">-</div></div>
+        <div class="card"><h3>UP</h3><div class="value" id="upHosts" style="color:green">-</div></div>
+        <div class="card"><h3>WARNING</h3><div class="value" id="warnHosts" style="color:orange">-</div></div>
+        <div class="card"><h3>DOWN</h3><div class="value" id="downHosts" style="color:red">-</div></div>
+        <div class="card"><h3>Open Alerts</h3><div class="value" id="openAlerts" style="color:red">-</div></div>
+    </div>
+
+    <div class="tab">
+        <button class="tablinks active" onclick="openTab(event,'Devices')">Devices</button>
+        <button class="tablinks" onclick="openTab(event,'Alerts')">Alerts</button>
+        <button class="tablinks" onclick="openTab(event,'History')">History</button>
+        <button class="tablinks" onclick="openTab(event,'Settings')" id="settingsTab">Settings</button>
+    </div>
+
+    <div id="Devices" class="tabcontent" style="display:block">
+        <div class="filters">
+            <label>Group: <select id="groupFilter" onchange="fetchDevices()"><option value="">All Groups</option></select></label>
+            <label>Status: <select id="statusFilter" onchange="fetchDevices()"><option value="">All</option><option value="UP">UP</option><option value="WARNING">WARNING</option><option value="DOWN">DOWN</option></select></label>
+        </div>
+        <table id="devicesTable">
+            <thead><tr>
+                <th>Hostname</th><th>IP</th><th>Status</th><th>Group</th><th>Last Seen</th>
+                <th>CPU%</th><th>Mem%</th><th>Disk%</th>
+                <th>Net Sent</th><th>Net Recv</th>
+                <th>Services</th><th>Ext. Devices</th>
+            </tr></thead>
+            <tbody></tbody>
+        </table>
+        <div>
+            <label for="trendRange">Trend Range:</label>
+            <select id="trendRange" onchange="loadChart()">
+                <option value="1h">Last Hour</option><option value="12h">Last 12 Hours</option><option value="24h">Last 24 Hours</option>
+                <option value="1w">Last Week</option><option value="1m">Last Month</option><option value="1y">Last Year</option>
+            </select>
+        </div>
+        <div class="chart-box"><canvas id="trendChart"></canvas></div>
+    </div>
+
+    <div id="Alerts" class="tabcontent">
+        <div class="filters">
+            <label>Status: <select id="alertStatusFilter" onchange="fetchAlerts()"><option value="">All</option><option value="OPEN">Open</option><option value="ACKNOWLEDGED">Acknowledged</option><option value="RESOLVED">Resolved</option></select></label>
+        </div>
+        <table id="alertsTable">
+            <thead><tr>
+                <th>Host</th><th>Metric</th><th>Value</th><th>Severity</th>
+                <th>Cause</th><th>Action</th><th>Time</th><th>Status</th><th>Ack</th>
+            </tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div id="History" class="tabcontent">
+        <h3>Historical Data</h3>
+        <label>Host: <input type="text" id="historyHost" placeholder="hostname"></label>
+        <label>Hours: <input type="number" id="historyHours" value="1" min="1" max="720"></label>
+        <label>Metric: <select id="historyMetric"><option value="cpu">CPU %</option><option value="memory">Memory %</option><option value="disk">Disk%</option><option value="network_sent">Net Sent (bytes)</option><option value="network_recv">Net Recv (bytes)</option></select></label>
+        <button onclick="fetchHistory()">Fetch</button>
+        <div class="chart-box"><canvas id="historyChart"></canvas></div>
+        <table id="historyTable" style="margin-top:20px">
+            <thead><tr><th>Timestamp</th><th>CPU%</th><th>Mem%</th><th>Disk%</th><th>Net Sent</th><th>Net Recv</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div id="Settings" class="tabcontent">
+        <h2>User Management</h2>
+        <div class="admin-section" id="userSection">
+            <input type="text" id="newUsername" placeholder="Username"><input type="password" id="newPassword" placeholder="Password">
+            <select id="newRole"><option value="manager">Manager</option><option value="admin">Admin</option></select>
+            <button onclick="createUser()">Create User</button>
+        </div>
+        <table id="usersTable"><thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Action</th></tr></thead><tbody></tbody></table>
+        <h2>Host Groups</h2>
+        <div class="admin-section"><input type="text" id="newGroupName" placeholder="Group name"><button onclick="createGroup()">Create Group</button></div>
+        <table id="groupsTable"><thead><tr><th>ID</th><th>Name</th><th>Action</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <script>
+        let trendChart = null, historyChartObj = null, selectedHost = null;
+        let currentUserRole = "{{ current_user.role }}";
+
+        function toggleDarkMode() { document.body.classList.toggle('dark'); localStorage.setItem('darkMode', document.body.classList.contains('dark')); }
+        if (localStorage.getItem('darkMode') === 'true') document.body.classList.add('dark');
+
+        function openTab(evt, name) {
+            document.querySelectorAll('.tabcontent').forEach(el => el.style.display = 'none');
+            document.querySelectorAll('.tablinks').forEach(el => el.classList.remove('active'));
+            document.getElementById(name).style.display = 'block';
+            evt.currentTarget.classList.add('active');
+            if (name === 'Alerts') fetchAlerts();
+            if (name === 'Settings') loadSettings();
+            if (name === 'Devices') fetchDevices();
+        }
+
+        async function updateSummary() {
+            const resp = await fetch('/api/summary');
+            const data = await resp.json();
+            document.getElementById('totalHosts').textContent = data.total;
+            document.getElementById('upHosts').textContent = data.up;
+            document.getElementById('warnHosts').textContent = data.warning;
+            document.getElementById('downHosts').textContent = data.down;
+            document.getElementById('openAlerts').textContent = data.open_alerts;
+        }
+
+        async function fetchDevices() {
+            const gf = document.getElementById('groupFilter').value, sf = document.getElementById('statusFilter').value;
+            let url = '/api/latest?'; if (gf) url += `group=${gf}&`; if (sf) url += `status=${sf}&`;
+            const resp = await fetch(url), data = await resp.json();
+            const tbody = document.querySelector('#devicesTable tbody'); tbody.innerHTML = '';
+            data.forEach(d => {
+                const row = tbody.insertRow();
+                row.innerHTML = `<td>${d.hostname}</td><td>${d.ip}</td><td class="status-${d.status}">${d.status}</td><td>${d.group_name}</td><td>${d.last_seen||''}</td><td>${d.cpu!=null?d.cpu+'%':'N/A'}</td><td>${d.memory!=null?d.memory+'%':'N/A'}</td><td>${d.disk!=null?d.disk+'%':'N/A'}</td><td>${formatBytes(d.network_sent)}</td><td>${formatBytes(d.network_recv)}</td><td>${formatServices(d.services)}</td><td>${formatDevices(d.network_devices)}</td>`;
+                row.onclick = () => { selectedHost = d.hostname; loadChart(); };
+            });
+            updateSummary(); loadGroupFilterOptions();
+        }
+
+        function formatBytes(bytes) {
+            if (bytes == null) return 'N/A';
+            if (bytes < 1024) return bytes + ' B';
+            const kb = bytes / 1024; if (kb < 1024) return kb.toFixed(1) + ' KB';
+            const mb = kb / 1024; if (mb < 1024) return mb.toFixed(1) + ' MB';
+            return (mb / 1024).toFixed(2) + ' GB';
+        }
+        function formatServices(s) { if (!s || Object.keys(s).length===0) return 'N/A'; return Object.entries(s).map(([k,v])=>`${k}:${v}`).join(', '); }
+        function formatDevices(d) { if (!d || d.length===0) return 'N/A'; return d.map(x=>`${x.name}(${x.reachable?'UP':'DOWN'})`).join(', '); }
+
+        async function loadGroupFilterOptions() {
+            const sel = document.getElementById('groupFilter'), cv = sel.value;
+            const resp = await fetch('/api/groups'), groups = await resp.json();
+            sel.innerHTML = '<option value="">All Groups</option>';
+            groups.forEach(g => { sel.innerHTML += `<option value="${g.id}" ${g.id==cv?'selected':''}>${g.name}</option>`; });
+        }
+
+        async function loadChart() {
+            if (!selectedHost) return;
+            const range = document.getElementById('trendRange').value;
+            const resp = await fetch(`/api/trends/${selectedHost}?range=${range}`), data = await resp.json();
+            if (data.length===0) return;
+            const labels = data.map(d=>d.timestamp), cpu = data.map(d=>d.cpu), mem = data.map(d=>d.memory), disk = data.map(d=>d.disk);
+            const ctx = document.getElementById('trendChart').getContext('2d');
+            if (trendChart) trendChart.destroy();
+            trendChart = new Chart(ctx, { type:'line', data:{ labels, datasets:[ {label:'CPU %', data:cpu, borderColor:'red', fill:false}, {label:'Memory %', data:mem, borderColor:'blue', fill:false}, {label:'Disk %', data:disk, borderColor:'green', fill:false} ] }, options:{ responsive:true, scales:{ y:{ beginAtZero:true, max:100 } } } });
+        }
+
+        async function fetchAlerts() {
+            const s = document.getElementById('alertStatusFilter').value;
+            let url = '/api/alerts?'; if (s) url += `status=${s}&`;
+            const resp = await fetch(url), alerts = await resp.json();
+            const tbody = document.querySelector('#alertsTable tbody'); tbody.innerHTML = '';
+            alerts.forEach(a => {
+                const row = tbody.insertRow();
+                row.innerHTML = `<td>${a.hostname}</td><td>${a.metric}</td><td>${a.value}</td><td>${a.severity}</td><td>${a.cause||''}</td><td>${a.action||''}</td><td>${a.timestamp}</td><td class="status-${a.status}">${a.status}</td><td>${a.status==='OPEN'?`<button class="ack-btn" onclick="ackAlert(${a.id})">Ack</button>`:''}</td>`;
+            });
+        }
+        async function ackAlert(id) { await fetch(`/api/alerts/${id}/acknowledge`, {method:'POST'}); fetchAlerts(); updateSummary(); }
+
+        async function fetchHistory() {
+            const host = document.getElementById('historyHost').value, hours = document.getElementById('historyHours').value, metric = document.getElementById('historyMetric').value;
+            if (!host) return alert('Enter a hostname');
+            const resp = await fetch(`/api/history/${host}?hours=${hours}`), data = await resp.json();
+            const tbody = document.querySelector('#historyTable tbody'); tbody.innerHTML = '';
+            data.forEach(d => { const row = tbody.insertRow(); row.innerHTML = `<td>${d.timestamp}</td><td>${d.cpu}</td><td>${d.memory}</td><td>${d.disk}</td><td>${d.network_sent}</td><td>${d.network_recv}</td>`; });
+            const ctx = document.getElementById('historyChart').getContext('2d'); if (historyChartObj) historyChartObj.destroy();
+            const labels = data.map(d=>d.timestamp), values = data.map(d=>d[metric]);
+            let yL = metric.replace('_',' ').toUpperCase(); if (metric.startsWith('network_')) yL += ' (bytes)'; else yL += ' %';
+            historyChartObj = new Chart(ctx, { type:'line', data:{ labels, datasets:[{label:yL, data:values, borderColor:'purple', fill:false, tension:0.1}] }, options:{ responsive:true, scales:{ y:{ beginAtZero:true, title:{display:true, text:yL} } } } });
+        }
+
+        async function loadSettings() {
+            if (currentUserRole !== 'admin') { document.getElementById('userSection').style.display='none'; return; }
+            const uResp = await fetch('/api/users'), users = await uResp.json();
+            const uTbody = document.querySelector('#usersTable tbody'); uTbody.innerHTML = '';
+            users.forEach(u => { const row = uTbody.insertRow(); row.innerHTML = `<td>${u.id}</td><td>${u.username}</td><td>${u.role}</td><td><button onclick="deleteUser(${u.id})">Delete</button></td>`; });
+            const gResp = await fetch('/api/groups'), groups = await gResp.json();
+            const gTbody = document.querySelector('#groupsTable tbody'); gTbody.innerHTML = '';
+            groups.forEach(g => { const row = gTbody.insertRow(); row.innerHTML = `<td>${g.id}</td><td>${g.name}</td><td><button onclick="deleteGroup(${g.id})">Delete</button></td>`; });
+        }
+
+        async function createUser() {
+            const u = document.getElementById('newUsername').value, p = document.getElementById('newPassword').value, r = document.getElementById('newRole').value;
+            await fetch('/api/users', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p, role:r})});
+            loadSettings(); document.getElementById('newUsername').value = document.getElementById('newPassword').value = '';
+        }
+        async function deleteUser(id) { if (confirm('Delete user?')) { await fetch(`/api/users/${id}`, {method:'DELETE'}); loadSettings(); } }
+        async function createGroup() {
+            const n = document.getElementById('newGroupName').value;
+            await fetch('/api/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:n})});
+            loadSettings(); document.getElementById('newGroupName').value = ''; fetchDevices();
+        }
+        async function deleteGroup(id) { if (confirm('Delete group?')) { await fetch(`/api/groups/${id}`, {method:'DELETE'}); loadSettings(); fetchDevices(); } }
+
+        fetchDevices(); setInterval(fetchDevices, 60000); updateSummary();
+    </script>
+</body>
+</html>
