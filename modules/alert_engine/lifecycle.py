@@ -8,7 +8,8 @@ def evaluate_alerts(hostname, data):
     cur = db.cursor()
     now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
-    cur.execute("SELECT * FROM alert_rules WHERE hostname=%s OR hostname IS NULL", (hostname,))
+    # Query: match exact hostname, or '%' (global), or NULL (also global)
+    cur.execute("SELECT * FROM alert_rules WHERE hostname = %s OR hostname = '%' OR hostname IS NULL", (hostname,))
     rules = cur.fetchall()
 
     for rule in rules:
@@ -29,6 +30,7 @@ def evaluate_alerts(hostname, data):
                 violated = True
 
             if violated:
+                # Check if there's already an OPEN or ACKNOWLEDGED alert for this metric
                 cur.execute(
                     "SELECT id, timestamp, status FROM alerts WHERE hostname=%s AND metric=%s "
                     "AND status IN ('OPEN','ACKNOWLEDGED') ORDER BY timestamp DESC LIMIT 1",
@@ -38,6 +40,7 @@ def evaluate_alerts(hostname, data):
                 fire = True
                 if existing:
                     last_time = existing[1]
+                    # Cooldown check: don't fire if last alert is within cooldown seconds
                     if (now - last_time).total_seconds() < cooldown:
                         fire = False
                 if fire:
@@ -49,6 +52,7 @@ def evaluate_alerts(hostname, data):
                     db.commit()
                     dispatch_alert(hostname, metric, value, threshold, severity, cause, action)
             else:
+                # If condition no longer violates, resolve any OPEN/ACKNOWLEDGED alerts
                 cur.execute(
                     "UPDATE alerts SET status = 'RESOLVED', resolved = 1, resolved_at = %s "
                     "WHERE hostname = %s AND metric = %s AND status IN ('OPEN','ACKNOWLEDGED')",
