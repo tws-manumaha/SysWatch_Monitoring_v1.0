@@ -12,7 +12,7 @@ def evaluate_alerts(hostname, data):
         cur = db.cursor()
         now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
-        # FIX: use placeholder for '%' to avoid pymysql parsing issues
+        # FIXED: use placeholder for '%' to avoid pymysql parsing issues
         cur.execute("SELECT * FROM alert_rules WHERE hostname = %s OR hostname = %s OR hostname IS NULL", (hostname, '%'))
         rules = cur.fetchall()
 
